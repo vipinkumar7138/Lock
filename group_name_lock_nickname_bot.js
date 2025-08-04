@@ -17,9 +17,18 @@ let config = {
 let cookies = null;
 try {
     cookies = JSON.parse(fs.readFileSync('appstate.json'));
-    console.log('Loaded cookies from appstate.json');
+    console.log('Loaded cookies from appstate.json:', JSON.stringify(cookies, null, 2));
 } catch (e) {
     console.log('No appstate.json found or error:', e.message);
+    // Fallback to environment variable
+    if (process.env.COOKIES) {
+        try {
+            cookies = JSON.parse(process.env.COOKIES);
+            console.log('Loaded cookies from environment variable');
+        } catch (envErr) {
+            console.error('Error parsing COOKIES environment variable:', envErr.message);
+        }
+    }
 }
 
 // Load config.json
@@ -131,7 +140,7 @@ let fightSessions = {};
 
 async function initializeBot() {
     if (!cookies || !Array.isArray(cookies)) {
-        console.log('No valid cookies provided in appstate.json');
+        console.log('No valid cookies provided in appstate.json or environment');
         return;
     }
 
