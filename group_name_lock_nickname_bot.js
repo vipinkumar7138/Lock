@@ -9,7 +9,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 // Configuration storage
 let config = {
     cookies: null,
-    prefix: '/devil',
+    prefix: '/',
     adminID: null,
     activeBots: {}
 };
