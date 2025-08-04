@@ -1,6 +1,6 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const fca = require('facebook-chat-api'); // Changed to facebook-chat-api
+const fca = require('facebook-chat-api');
 const fs = require('fs');
 
 const app = express();
@@ -13,6 +13,15 @@ let config = {
     adminID: process.env.ADMIN_ID || null,
     activeBots: {}
 };
+
+// Load config.json if no environment variables
+try {
+    const savedConfig = fs.readFileSync('config.json');
+    config = { ...config, ...JSON.parse(savedConfig) };
+    console.log('Loaded saved configuration:', config);
+} catch (e) {
+    console.log('No saved configuration found or error:', e.message);
+}
 
 // Serve HTML interface
 app.get('/', (req, res) => {
@@ -42,7 +51,7 @@ app.get('/', (req, res) => {
             </div>
             <div class="form-group">
                 <label for="prefix">Bot Prefix:</label>
-                <input type="text" id="prefix" name="prefix" value="/devil" required>
+                <input type="text" id="prefix" name="prefix" value="/" required>
             </div>
             <div class="form-group">
                 <label for="adminID">Admin Facebook ID:</label>
@@ -82,8 +91,10 @@ app.get('/', (req, res) => {
 
 app.post('/configure', (req, res) => {
     try {
-        config.cookies = JSON.parse(req.body.cookies);
-        config.prefix = req.body.prefix || '/devil';
+        const cookies = JSON.parse(req.body.cookies);
+        if (!Array.isArray(cookies)) throw new Error('Cookies must be an array');
+        config.cookies = cookies;
+        config.prefix = req.body.prefix || '/';
         config.adminID = req.body.adminID;
         
         fs.writeFileSync('config.json', JSON.stringify(config));
@@ -99,14 +110,7 @@ app.post('/configure', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
-    try {
-        const savedConfig = fs.readFileSync('config.json');
-        config = JSON.parse(savedConfig);
-        console.log('Loaded saved configuration');
-        initializeBot();
-    } catch (e) {
-        console.log('No saved configuration found.');
-    }
+    initializeBot();
 });
 
 // Bot functionality
@@ -115,24 +119,48 @@ let lockedNicknames = {};
 let fightSessions = {};
 
 async function initializeBot() {
-    if (!config.cookies) return;
+    if (!config.cookies || !Array.isArray(config.cookies)) {
+        console.log('No valid cookies provided in config');
+        return;
+    }
 
     console.log('Initializing bot with facebook-chat-api...');
     
     try {
-        // Debug: Log module type
-        console.log('FCA Module:', typeof fca, fca);
-        const api = await fca({ appState: config.cookies });
+        console.log('AppState:', JSON.stringify(config.cookies, null, 2));
+        const api = await new Promise((resolve, reject) => {
+            fca({ appState: config.cookies }, (err, api) => {
+                if (err) {
+                    console.error('FCA Login Error:', err);
+                    return reject(err);
+                }
+                if (!api) {
+                    return reject(new Error('API object is null or undefined'));
+                }
+                resolve(api);
+            });
+        });
+
+        console.log('API initialized successfully:', !!api);
         config.activeBots[config.adminID] = api;
         
-        api.setOptions({
-            selfListen: true,
-            listenEvents: true,
-            updatePresence: false
-        });
+        // Set options safely
+        try {
+            api.setOptions({
+                forceLogin: true,
+                selfListen: true,
+                listenEvents: true,
+                updatePresence: false
+            });
+            console.log('Options set successfully');
+        } catch (err) {
+            console.error('SetOptions error:', err);
+            return;
+        }
 
         api.listen(async (err, event) => {
             if (err) return console.error('Listen error:', err);
+            console.log('Event received:', event.type);
             if (event.type === 'message' || event.type === 'message_reply') {
                 await handleMessage(api, event);
             } else if (event.type === 'change_thread_name') {
@@ -165,7 +193,7 @@ async function handleMessage(api, event) {
     }
     
     // Check for commands
-    if (!body.startsWith(config.prefix)) return;
+    if (!body || !body.startsWith(config.prefix)) return;
     
     const args = body.slice(config.prefix.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
@@ -308,7 +336,6 @@ async function handleNicknameChange(api, event) {
     }
 }
 
-// Handle fight mode responses
 app.post('/fight', express.json(), async (req, res) => {
     const { threadID, haterName, messages, delay } = req.body;
     
@@ -317,7 +344,7 @@ app.post('/fight', express.json(), async (req, res) => {
     }
     
     const api = config.activeBots[config.adminID];
-    if (!api) return res.status(500).send('Bot not initialized');
+    if (!api) return res.status(400).send('Bot not initialized');
     
     fightSessions[threadID].messages = messages.split('\n');
     fightSessions[threadID].haterName = haterName;
