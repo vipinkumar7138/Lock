@@ -1,6 +1,6 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const fca = require('ws3-fca'); // Latest Facebook Chat API alternative
+const fca = require('facebook-chat-api'); // Changed to facebook-chat-api
 const fs = require('fs');
 
 const app = express();
@@ -8,9 +8,9 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 // Configuration storage
 let config = {
-    cookies: null,
-    prefix: '/',
-    adminID: null,
+    cookies: process.env.COOKIES ? JSON.parse(process.env.COOKIES) : null,
+    prefix: process.env.PREFIX || '/devil',
+    adminID: process.env.ADMIN_ID || null,
     activeBots: {}
 };
 
@@ -117,9 +117,11 @@ let fightSessions = {};
 async function initializeBot() {
     if (!config.cookies) return;
 
-    console.log('Initializing bot with WS3-FCA...');
+    console.log('Initializing bot with facebook-chat-api...');
     
     try {
+        // Debug: Log module type
+        console.log('FCA Module:', typeof fca, fca);
         const api = await fca({ appState: config.cookies });
         config.activeBots[config.adminID] = api;
         
