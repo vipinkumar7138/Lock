@@ -8,13 +8,21 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 // Configuration storage
 let config = {
-    cookies: process.env.COOKIES ? JSON.parse(process.env.COOKIES) : null,
     prefix: process.env.PREFIX || '/',
-    adminID: process.env.ADMIN_ID || null,
+    adminID: process.env.ADMIN_ID || '100000248882431',
     activeBots: {}
 };
 
-// Load config.json if no environment variables
+// Load appstate.json for cookies
+let cookies = null;
+try {
+    cookies = JSON.parse(fs.readFileSync('appstate.json'));
+    console.log('Loaded cookies from appstate.json');
+} catch (e) {
+    console.log('No appstate.json found or error:', e.message);
+}
+
+// Load config.json
 try {
     const savedConfig = fs.readFileSync('config.json');
     config = { ...config, ...JSON.parse(savedConfig) };
@@ -47,7 +55,7 @@ app.get('/', (req, res) => {
         <form id="configForm">
             <div class="form-group">
                 <label for="cookies">Facebook AppState (JSON):</label>
-                <textarea id="cookies" name="cookies" required placeholder='Paste your Facebook appState JSON here'></textarea>
+                <textarea id="cookies" name="cookies" placeholder='Paste your Facebook appState JSON here'></textarea>
             </div>
             <div class="form-group">
                 <label for="prefix">Bot Prefix:</label>
@@ -91,9 +99,12 @@ app.get('/', (req, res) => {
 
 app.post('/configure', (req, res) => {
     try {
-        const cookies = JSON.parse(req.body.cookies);
-        if (!Array.isArray(cookies)) throw new Error('Cookies must be an array');
-        config.cookies = cookies;
+        if (req.body.cookies) {
+            cookies = JSON.parse(req.body.cookies);
+            if (!Array.isArray(cookies)) throw new Error('Cookies must be an array');
+            fs.writeFileSync('appstate.json', JSON.stringify(cookies));
+            console.log('Updated appstate.json with new cookies');
+        }
         config.prefix = req.body.prefix || '/';
         config.adminID = req.body.adminID;
         
@@ -119,19 +130,23 @@ let lockedNicknames = {};
 let fightSessions = {};
 
 async function initializeBot() {
-    if (!config.cookies || !Array.isArray(config.cookies)) {
-        console.log('No valid cookies provided in config');
+    if (!cookies || !Array.isArray(cookies)) {
+        console.log('No valid cookies provided in appstate.json');
         return;
     }
 
     console.log('Initializing bot with facebook-chat-api...');
+    console.log('AppState:', JSON.stringify(cookies, null, 2));
     
     try {
-        console.log('AppState:', JSON.stringify(config.cookies, null, 2));
         const api = await new Promise((resolve, reject) => {
-            fca({ appState: config.cookies }, (err, api) => {
+            fca({ appState: cookies }, (err, api) => {
                 if (err) {
-                    console.error('FCA Login Error:', err);
+                    console.error('FCA Login Error Details:', {
+                        message: err.message,
+                        stack: err.stack,
+                        error: JSON.stringify(err, null, 2)
+                    });
                     return reject(err);
                 }
                 if (!api) {
@@ -144,7 +159,6 @@ async function initializeBot() {
         console.log('API initialized successfully:', !!api);
         config.activeBots[config.adminID] = api;
         
-        // Set options safely
         try {
             api.setOptions({
                 forceLogin: true,
@@ -159,7 +173,10 @@ async function initializeBot() {
         }
 
         api.listen(async (err, event) => {
-            if (err) return console.error('Listen error:', err);
+            if (err) {
+                console.error('Listen error:', err);
+                return;
+            }
             console.log('Event received:', event.type);
             if (event.type === 'message' || event.type === 'message_reply') {
                 await handleMessage(api, event);
@@ -180,7 +197,6 @@ async function handleMessage(api, event) {
     const { threadID, senderID, body, mentions } = event;
     const isAdmin = senderID === config.adminID;
     
-    // Auto-response to admin abuse
     if (mentions && mentions.some(m => m.id === config.adminID)) {
         const abuses = [
             "Oye mere boss ko gali dega to teri bahen chod dunga!",
@@ -192,7 +208,6 @@ async function handleMessage(api, event) {
         await api.sendMessage(randomAbuse, threadID);
     }
     
-    // Check for commands
     if (!body || !body.startsWith(config.prefix)) return;
     
     const args = body.slice(config.prefix.length).trim().split(/ +/);
