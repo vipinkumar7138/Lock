@@ -9,7 +9,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 // Configuration storage
 let config = {
     cookies: process.env.COOKIES ? JSON.parse(process.env.COOKIES) : null,
-    prefix: process.env.PREFIX || '/devil',
+    prefix: process.env.PREFIX || '/',
     adminID: process.env.ADMIN_ID || null,
     activeBots: {}
 };
